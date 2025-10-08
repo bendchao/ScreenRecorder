@@ -29,7 +29,7 @@ namespace ScreenRecorder
         private int frameRate = 10; // 默认帧率
         private int frameCount = 0;
         private int videoQuality = 20; // 视频质量参数，范围0-100
-        private string remoteServerUrl = "http://192.168.79.28:5000/api/upload/file"; // 远程存储服务器地址
+        private string remoteServerUrl = "http://192.168.79.28:5198/api/upload/file"; // 远程存储服务器地址
         private System.Timers.Timer? autoUploadTimer; // 自动上传定时器
         private DateTime lastAutoUploadTime; // 上次自动上传时间
         private int autoUploadIntervalMinutes = 10; // 自动上传间隔（分钟）
@@ -416,6 +416,22 @@ namespace ScreenRecorder
                     return string.Empty;
                 }
 
+                // 删除原文件
+                try
+                {
+                    foreach (string fileToDelete in filesToCompress)
+                    {
+                        if (File.Exists(fileToDelete))
+                        {
+                            File.Delete(fileToDelete);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("删除原文件时出错: " + ex.Message, "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
                 // 显示压缩成功信息
                 long compressedSize = new FileInfo(zipFilePath).Length;
                 double compressionRatio = (double)compressedSize / originalSize * 100;
@@ -572,6 +588,22 @@ namespace ScreenRecorder
                     return string.Empty;
                 }
 
+                // 删除原文件
+                try
+                {
+                    foreach (string fileToDelete in filesToCompress)
+                    {
+                        if (File.Exists(fileToDelete))
+                        {
+                            File.Delete(fileToDelete);
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // 自动上传过程中的错误不需要显示消息
+                }
+                
                 return zipFilePath;
             }
             catch (Exception)
@@ -656,20 +688,65 @@ namespace ScreenRecorder
 
                     using (var httpClient = new HttpClient())
                     {
-                        using (var content = new MultipartFormDataContent())
+                        using (var fileStream = File.OpenRead(zipFilePath))
                         {
-                            var fileContent = new StreamContent(File.OpenRead(zipFilePath));
-                            content.Add(fileContent, "file", Path.GetFileName(zipFilePath));
+                            using (var content = new MultipartFormDataContent())
+                            {
+                                var fileContent = new StreamContent(fileStream);
+                                content.Add(fileContent, "file", Path.GetFileName(zipFilePath));
 
-                            label.Text = "正在上传...";
-                            Application.DoEvents();
+                                label.Text = "正在上传...";
+                                Application.DoEvents();
 
-                            var response = await httpClient.PostAsync(remoteServerUrl, content);
-                            response.EnsureSuccessStatusCode();
+                                var response = await httpClient.PostAsync(remoteServerUrl, content);
+                                response.EnsureSuccessStatusCode();
 
-                            progressForm.Close();
-                            MessageBox.Show("文件上传成功！", "上传成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                progressForm.Close();
+                                MessageBox.Show("文件上传成功！", "上传成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            }
                         }
+                    }
+
+                    // 上传成功后删除压缩文件，添加延迟重试机制
+                    try
+                    {
+                        // 等待一段时间让系统释放文件句柄
+                        System.Threading.Thread.Sleep(500);
+                        
+                        // 尝试多次删除操作
+                        int maxRetries = 3;
+                        int retryCount = 0;
+                        bool deleted = false;
+                        
+                        while (!deleted && retryCount < maxRetries)
+                        {
+                            try
+                            {
+                                if (File.Exists(zipFilePath))
+                                {
+                                    File.Delete(zipFilePath);
+                                    deleted = true;
+                                }
+                            }
+                            catch (IOException)
+                            {
+                                // 文件仍被占用，等待后重试
+                                retryCount++;
+                                if (retryCount < maxRetries)
+                                {
+                                    System.Threading.Thread.Sleep(1000);
+                                }
+                            }
+                        }
+                        
+                        if (!deleted && File.Exists(zipFilePath))
+                        {
+                            MessageBox.Show("无法删除压缩文件，文件可能仍被占用。您可以稍后手动删除该文件。", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("删除压缩文件时出错: " + ex.Message, "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
             }
