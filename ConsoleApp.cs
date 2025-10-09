@@ -2,6 +2,8 @@ using System;
 using System.Threading.Tasks;
 using System.Threading;
 using System.IO;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace ScreenRecorder
 {
@@ -17,11 +19,13 @@ namespace ScreenRecorder
         private string? videoOutputPath;
         private string? keylogPath;
 
+
         // 功能类实例
         private ScreenRecorder? screenRecorder;
         private FileCompressor? fileCompressor;
         private FileUploader? fileUploader;
         private AutoUploadTimer? autoUploadTimer;
+        private UploadQueueManager? uploadQueueManager;
 
         // 屏幕捕获定时器
         private System.Timers.Timer? screenCaptureTimer;
@@ -29,6 +33,14 @@ namespace ScreenRecorder
         public ConsoleApp()
         {
             cancellationTokenSource = new CancellationTokenSource();
+            // 初始化上传队列管理器，用于断网续传功能
+            uploadQueueManager = new UploadQueueManager();
+            
+            // 订阅网络恢复事件
+            uploadQueueManager.NetworkRestored += async (sender, e) =>
+            {
+                await HandleNetworkRestoredAsync();
+            };
         }
 
         public async Task RunAsync()
@@ -40,6 +52,9 @@ namespace ScreenRecorder
 
             try
             {
+                // 程序启动时，尝试上传队列中的文件（断网续传功能）
+                await TryUploadPendingFilesAsync();
+
                 // 直接在主线程中处理按键输入
                 while (!cancellationTokenSource.IsCancellationRequested)
                 {
@@ -127,6 +142,61 @@ namespace ScreenRecorder
             }
         }
 
+        // 网络恢复时的处理方法
+        private async Task HandleNetworkRestoredAsync()
+        {
+            Console.WriteLine("检测到网络已恢复，自动尝试上传队列中的文件...");
+            try
+            {
+                // 确保fileUploader已初始化
+                if (fileUploader == null && uploadQueueManager != null)
+                {
+                    fileUploader = new FileUploader(uploadQueueManager);
+                    Console.WriteLine("文件上传器已初始化");
+                }
+                
+                await TryUploadPendingFilesAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"网络恢复时处理上传任务出错: {ex.Message}");
+            }
+        }
+
+        // 尝试上传队列中的待处理文件（断网续传功能）
+        private async Task TryUploadPendingFilesAsync()
+        {
+            try
+            {
+                // 初始化文件上传器（如果还没有初始化）
+                if (fileUploader == null && uploadQueueManager != null)
+                {
+                    fileUploader = new FileUploader(uploadQueueManager);
+                }
+
+                if (fileUploader != null && uploadQueueManager != null)
+                {
+                    Console.WriteLine("检查是否有待上传的文件...");
+                    List<UploadQueueManager.UploadQueueItem> queue = uploadQueueManager.GetQueue();
+
+                    if (queue.Count > 0)
+                    {
+                        Console.WriteLine($"发现 {queue.Count} 个待上传的文件，准备尝试上传...");
+                        int successCount = await fileUploader.TryUploadQueueFilesAsync();
+                        Console.WriteLine($"队列文件上传完成，成功上传 {successCount} 个文件");
+                    }
+                    else
+                    {
+                        Console.WriteLine("没有发现待上传的文件");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"尝试上传队列文件时出错: {ex.Message}");
+            }
+        }
+
         private async Task StartRecordingAsync()
         {
             try
@@ -168,7 +238,7 @@ namespace ScreenRecorder
                 {
                     Console.WriteLine($"警告：初始化文件压缩器失败: {ex.Message}");
                 }
-                fileUploader = new FileUploader();
+                fileUploader = new FileUploader(uploadQueueManager);
 
                 // 启动屏幕捕获定时器
                 screenCaptureTimer = new System.Timers.Timer();

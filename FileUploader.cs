@@ -12,11 +12,21 @@ namespace ScreenRecorder
     public class FileUploader
     {
         private string remoteServerUrl = "http://192.168.79.28:5198/api/upload/file"; // 默认远程存储服务器地址
+        private UploadQueueManager uploadQueueManager;
 
         public string RemoteServerUrl
         {
             get { return remoteServerUrl; }
             set { remoteServerUrl = value; }
+        }
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        /// <param name="queueManager">上传队列管理器，用于断网续传功能</param>
+        public FileUploader(UploadQueueManager queueManager = null)
+        {
+            uploadQueueManager = queueManager ?? new UploadQueueManager();
         }
 
         /// <summary>
@@ -106,8 +116,11 @@ namespace ScreenRecorder
 
                     return true;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    // 上传失败，将文件添加到上传队列
+                    Console.WriteLine($"上传失败: {ex.Message}");
+                    uploadQueueManager?.AddToQueue(zipFilePath, keylogFilePath);
                     return false;
                 }
             });
@@ -121,6 +134,18 @@ namespace ScreenRecorder
         public async Task<bool> UploadToRemoteServerAsync(string zipFilePath)
         {
             return await UploadToRemoteServerAsync(zipFilePath, null);
+        }
+
+        /// <summary>
+        /// 尝试上传队列中的文件
+        /// </summary>
+        /// <returns>成功上传的文件数</returns>
+        public async Task<int> TryUploadQueueFilesAsync()
+        {
+            if (uploadQueueManager == null)
+                return 0;
+            
+            return await uploadQueueManager.TryUploadQueueFilesAsync(this);
         }
     }
 }
