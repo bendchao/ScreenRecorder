@@ -196,11 +196,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\Project\\capture\\ScreenRecorder.csproj",
+      "projectUniqueName": "D:\\Project\\ScreenRecorder\\ScreenRecorder.csproj",
       "projectName": "ScreenRecorder",
-      "projectPath": "D:\\Project\\capture\\ScreenRecorder.csproj",
+      "projectPath": "D:\\Project\\ScreenRecorder\\ScreenRecorder.csproj",
       "packagesPath": "C:\\Users\\huawei\\.nuget\\packages\\",
-      "outputPath": "D:\\Project\\capture\\obj\\",
+      "outputPath": "D:\\Project\\ScreenRecorder\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "D:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
