@@ -27,6 +27,15 @@ namespace ScreenRecorder
         {
             string[] possiblePaths = new string[]
             {
+                // 优先查找当前目录下的7z.dll
+                Path.Combine(Environment.CurrentDirectory, "7z.dll"),
+                // 查找当前目录下的7-Zip子目录中的7z.dll
+                Path.Combine(Environment.CurrentDirectory, "7-Zip", "7z.dll"),
+                // 查找程序运行目录下的7z.dll
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "7z.dll"),
+                // 查找程序运行目录下的7-Zip子目录中的7z.dll
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "7-Zip", "7z.dll"),
+                // 如果以上路径都没有，再尝试系统安装的7-Zip
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip", "7z.dll"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip", "7z.dll")
             };
@@ -35,11 +44,12 @@ namespace ScreenRecorder
             {
                 if (File.Exists(path))
                 {
+                    Console.WriteLine($"找到7z.dll库文件: {path}");
                     return path;
                 }
             }
 
-            throw new FileNotFoundException("未找到7z.dll库文件！请先安装7-Zip。");
+            throw new FileNotFoundException("未找到7z.dll库文件！请确保7z.dll文件位于程序目录或7-Zip子目录中。");
         }
 
         /// <summary>
