@@ -24,7 +24,7 @@ namespace ScreenRecorder
         /// 构造函数
         /// </summary>
         /// <param name="queueManager">上传队列管理器，用于断网续传功能</param>
-        public FileUploader(UploadQueueManager queueManager = null)
+        public FileUploader(UploadQueueManager? queueManager = null)
         {
             uploadQueueManager = queueManager ?? new UploadQueueManager();
         }
@@ -39,25 +39,38 @@ namespace ScreenRecorder
         {
             if (string.IsNullOrEmpty(zipFilePath) || !File.Exists(zipFilePath))
             {
+                Console.WriteLine("上传失败：文件不存在或路径为空");
                 return false;
             }
 
-            // 在后台线程中执行上传操作
-            return await Task.Run(async () =>
+            // 定义重试次数和间隔
+            int maxRetries = 2;
+            int retryDelay = 2000; // 2秒
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
                 {
                     using (var httpClient = new HttpClient())
                     {
-                        using (var fileStream = File.OpenRead(zipFilePath))
+                        // 设置超时时间为30秒
+                        httpClient.Timeout = TimeSpan.FromSeconds(30);
+                        
+                        // 使用文件流上传文件
+                        using (var fileStream = new FileStream(zipFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, true))
                         {
                             using (var content = new MultipartFormDataContent())
                             {
                                 var fileContent = new StreamContent(fileStream);
+                                // 设置内容类型
+                                fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
                                 content.Add(fileContent, "file", Path.GetFileName(zipFilePath));
 
+                                Console.WriteLine($"尝试上传文件（第{attempt}/{maxRetries}次）：{zipFilePath}");
                                 var response = await httpClient.PostAsync(remoteServerUrl, content);
                                 response.EnsureSuccessStatusCode();
+                                
+                                Console.WriteLine($"文件上传成功：{zipFilePath}");
                             }
                         }
                     }
@@ -76,11 +89,11 @@ namespace ScreenRecorder
                         }
 
                         // 尝试多次删除操作
-                        int maxRetries = 3;
-                        int retryCount = 0;
+                        int deleteRetries = 0;
                         bool allDeleted = false;
+                        const int maxDeleteRetries = 3;
 
-                        while (!allDeleted && retryCount < maxRetries)
+                        while (!allDeleted && deleteRetries < maxDeleteRetries)
                         {
                             allDeleted = true;
                             foreach (string filePath in filesToDelete)
@@ -90,6 +103,7 @@ namespace ScreenRecorder
                                     try
                                     {
                                         File.Delete(filePath);
+                                        Console.WriteLine($"已删除文件：{filePath}");
                                     }
                                     catch (IOException)
                                     {
@@ -101,8 +115,8 @@ namespace ScreenRecorder
 
                             if (!allDeleted)
                             {
-                                retryCount++;
-                                if (retryCount < maxRetries)
+                                deleteRetries++;
+                                if (deleteRetries < maxDeleteRetries)
                                 {
                                     await Task.Delay(1000);
                                 }
@@ -121,9 +135,16 @@ namespace ScreenRecorder
                     // 上传失败，将文件添加到上传队列
                     Console.WriteLine($"上传失败: {ex.Message}");
                     uploadQueueManager?.AddToQueue(zipFilePath, keylogFilePath);
+                    if (attempt < maxRetries)
+                    {
+                        Console.WriteLine($"{retryDelay/1000}秒后重试...");
+                        await Task.Delay(retryDelay);
+                        continue;
+                    }
                     return false;
                 }
-            });
+            }
+            return false;
         }
 
         /// <summary>
@@ -133,7 +154,7 @@ namespace ScreenRecorder
         /// <returns>上传是否成功</returns>
         public async Task<bool> UploadToRemoteServerAsync(string zipFilePath)
         {
-            return await UploadToRemoteServerAsync(zipFilePath, null);
+            return await UploadToRemoteServerAsync(zipFilePath, string.Empty);
         }
 
         /// <summary>

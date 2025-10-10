@@ -82,7 +82,7 @@ namespace ScreenRecorder
         /// </summary>
         /// <param name="filePath">文件路径</param>
         /// <param name="keylogFilePath">键盘记录文件路径</param>
-        public void AddToQueue(string filePath, string keylogFilePath = null)
+        public void AddToQueue(string filePath, string? keylogFilePath = null)
         {
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
                 return;

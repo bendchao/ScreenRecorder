@@ -35,7 +35,7 @@ namespace ScreenRecorder
             cancellationTokenSource = new CancellationTokenSource();
             // 初始化上传队列管理器，用于断网续传功能
             uploadQueueManager = new UploadQueueManager();
-            
+
             // 订阅网络恢复事件
             uploadQueueManager.NetworkRestored += async (sender, e) =>
             {
@@ -56,12 +56,12 @@ namespace ScreenRecorder
                 await TryUploadPendingFilesAsync();
 
                 // 直接在主线程中处理按键输入
-                while (!cancellationTokenSource.IsCancellationRequested)
+                while (cancellationTokenSource != null && !cancellationTokenSource.IsCancellationRequested)
                 {
                     if (Console.KeyAvailable)
                     {
                         ConsoleKeyInfo keyInfo = Console.ReadKey(true);
-                        
+
                         if (keyInfo.Key == ConsoleKey.S)
                         {
                             if (!isRecording)
@@ -100,7 +100,7 @@ namespace ScreenRecorder
                 {
                     Console.WriteLine($"停止录制时出错: {ex.Message}");
                 }
-                
+
                 // 释放所有资源
                 try
                 {
@@ -110,7 +110,7 @@ namespace ScreenRecorder
                         screenRecorder.StopRecording();
                         screenRecorder = null;
                     }
-                    
+
                     // 释放捕获定时器
                     if (screenCaptureTimer != null)
                     {
@@ -118,14 +118,14 @@ namespace ScreenRecorder
                         screenCaptureTimer.Dispose();
                         screenCaptureTimer = null;
                     }
-                    
+
                     // 释放自动上传定时器
                     if (autoUploadTimer != null)
                     {
                         autoUploadTimer.Stop();
                         autoUploadTimer = null;
                     }
-                    
+
                     // 释放取消令牌源
                     if (cancellationTokenSource != null)
                     {
@@ -137,7 +137,7 @@ namespace ScreenRecorder
                 {
                     Console.WriteLine($"释放资源时出错: {ex.Message}");
                 }
-                
+
                 Console.WriteLine("程序已安全退出");
             }
         }
@@ -154,7 +154,7 @@ namespace ScreenRecorder
                     fileUploader = new FileUploader(uploadQueueManager);
                     Console.WriteLine("文件上传器已初始化");
                 }
-                
+
                 await TryUploadPendingFilesAsync();
             }
             catch (Exception ex)
@@ -203,12 +203,12 @@ namespace ScreenRecorder
             {
                 // 添加一个小的延迟，使这个方法成为真正的异步方法
                 await Task.Yield();
-                
+
                 // 创建输出目录（使用当前应用程序目录）
                 string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
                 string captureFolder = Path.Combine(appDirectory, "ScreenCaptures");
                 Directory.CreateDirectory(captureFolder);
-                
+
                 // 设置视频输出路径
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
                 keylogPath = Path.Combine(captureFolder, $"KeyLog_{timestamp}.txt");
@@ -238,11 +238,13 @@ namespace ScreenRecorder
                 {
                     Console.WriteLine($"警告：初始化文件压缩器失败: {ex.Message}");
                 }
-                fileUploader = new FileUploader(uploadQueueManager);
+                fileUploader = uploadQueueManager != null ? new FileUploader(uploadQueueManager) : new FileUploader();
 
                 // 启动屏幕捕获定时器
-                screenCaptureTimer = new System.Timers.Timer();
-                screenCaptureTimer.Interval = 1000 / frameRate; // 根据帧率设置间隔
+                screenCaptureTimer = new System.Timers.Timer
+                {
+                    Interval = 1000 / frameRate // 根据帧率设置间隔
+                };
                 screenCaptureTimer.Elapsed += async (sender, e) => await CaptureFrameAsync();
                 screenCaptureTimer.Start();
 
@@ -274,14 +276,14 @@ namespace ScreenRecorder
                 screenCaptureTimer.Dispose();
                 screenCaptureTimer = null;
             }
-            
+
             // 停止录制器
             screenRecorder?.StopRecording();
-            
+
             // 设置录制状态为false
             isRecording = false;
         }
-        
+
         private async Task StopRecordingAsync()
         {
             try
@@ -301,9 +303,9 @@ namespace ScreenRecorder
                 // 停止并释放自动上传定时器
                 autoUploadTimer?.Stop();
                 autoUploadTimer = null;
-                
+
                 Console.WriteLine("录制已停止，正在处理文件...");
-                
+
                 // 等待一小段时间确保所有资源都已释放
                 await Task.Delay(200);
 
@@ -319,7 +321,7 @@ namespace ScreenRecorder
                         // 执行异步压缩
                         Console.WriteLine("正在压缩文件...");
                         string zipFilePath = fileCompressor.CompressFiles(videoOutputPath, keylogPath);
-                           
+
                         if (!string.IsNullOrEmpty(zipFilePath))
                         {
                             // 等待一段时间确保压缩文件句柄被释放
@@ -328,7 +330,7 @@ namespace ScreenRecorder
                             // 执行上传到服务器
                             Console.WriteLine("正在上传文件...");
                             bool uploadSuccess = await fileUploader.UploadToRemoteServerAsync(zipFilePath, keylogPath);
-                            
+
                             if (uploadSuccess)
                             {
                                 Console.WriteLine("文件上传成功，已删除临时文件");
@@ -360,13 +362,13 @@ namespace ScreenRecorder
         {
             // 添加一个小的延迟，使这个方法成为真正的异步方法
             await Task.Yield();
-            
+
             // 首先检查录制状态和资源是否有效
             if (!isRecording || screenRecorder == null || screenCaptureTimer == null)
             {
                 return;
             }
-            
+
             try
             {
                 // 再次检查screenRecorder是否为null，防止在异步过程中被释放
@@ -430,7 +432,7 @@ namespace ScreenRecorder
                     // 保存当前的输出路径引用，因为后续操作会更新这些变量
                     string currentVideoPath = videoOutputPath;
                     string currentKeylogPath = keylogPath;
-                    
+
                     // 停止当前录制和捕获定时器，但保留文件路径信息
                     StopRecordingComponents();
 
@@ -460,7 +462,7 @@ namespace ScreenRecorder
                     {
                         keylogWriter.WriteLine($"自动上传已启动: {DateTime.Now}");
                     }
-                    
+
                     Console.WriteLine("自动上传已启动，继续录制");
                 }
                 catch (Exception ex)
@@ -481,25 +483,25 @@ namespace ScreenRecorder
             try
             {
                 // 保存当前目录信息，避免后续操作影响
-                string captureFolder = null;
+                string? captureFolder = null;
                 if (!string.IsNullOrEmpty(videoOutputPath))
                 {
                     captureFolder = Path.GetDirectoryName(videoOutputPath);
                 }
-                
+
                 if (captureFolder != null && Directory.Exists(captureFolder))
                 {
                     // 创建新的时间戳和文件路径
                     string newTimestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
                     string newKeylogPath = Path.Combine(captureFolder, $"KeyLog_{newTimestamp}_Part.txt");
                     string newVideoPath = Path.Combine(captureFolder, $"ScreenRecording_{newTimestamp}_Part.avi");
-                    
+
                     // 首先创建新的键盘记录文件
                     using (StreamWriter keylogWriter = new StreamWriter(newKeylogPath))
                     {
                         keylogWriter.WriteLine($"继续录制: {DateTime.Now}");
                     }
-                    
+
                     // 异步创建并启动新的录制器，避免阻塞主线程
                     await Task.Run(() =>
                     {
@@ -509,24 +511,24 @@ namespace ScreenRecorder
                             ScreenRecorder newRecorder = new ScreenRecorder();
                             newRecorder.SetFrameRate(frameRate);
                             newRecorder.SetVideoQuality(videoQuality);
-                            
+
                             // 立即启动新录制器
                             newRecorder.StartRecording(newVideoPath);
-                            
+
                             // 保存新的路径
                             keylogPath = newKeylogPath;
                             videoOutputPath = newVideoPath;
-                            
+
                             // 释放旧的录制器资源
                             if (screenRecorder != null)
                             {
                                 screenRecorder.StopRecording();
                                 screenRecorder = null;
                             }
-                            
+
                             // 替换为新的录制器
                             screenRecorder = newRecorder;
-                            
+
                             Console.WriteLine($"创建新的录制文件: {videoOutputPath}");
                         }
                         catch (Exception ex)
@@ -534,7 +536,7 @@ namespace ScreenRecorder
                             Console.WriteLine($"创建新录制器时出错: {ex.Message}");
                         }
                     });
-                    
+
                     // 立即创建并启动新的捕获定时器，不等待录制器完全初始化
                     try
                     {
@@ -544,7 +546,7 @@ namespace ScreenRecorder
                             screenCaptureTimer.Stop();
                             screenCaptureTimer.Dispose();
                         }
-                        
+
                         // 重新启动屏幕捕获定时器
                         screenCaptureTimer = new System.Timers.Timer();
                         screenCaptureTimer.Interval = 1000 / frameRate; // 根据帧率设置间隔
@@ -556,11 +558,11 @@ namespace ScreenRecorder
                     {
                         Console.WriteLine($"重启捕获定时器时出错: {ex.Message}");
                     }
-                    
+
                     // 立即设置录制状态为true，不等待所有操作完成
                     isRecording = true;
                     Console.WriteLine("录制状态已设置为: " + isRecording);
-                    
+
                     // 异步处理自动上传定时器的初始化，不阻塞录制重启
                     await Task.Run(() =>
                     {

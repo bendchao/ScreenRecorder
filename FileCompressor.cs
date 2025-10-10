@@ -54,7 +54,8 @@ namespace ScreenRecorder
             {
                 // 创建压缩文件路径
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                string zipFilePath = Path.Combine(Path.GetDirectoryName(videoFilePath), "ScreenCapture_" + timestamp + ".7z");
+                string? directory = Path.GetDirectoryName(videoFilePath);
+                string zipFilePath = directory != null ? Path.Combine(directory, "ScreenCapture_" + timestamp + ".7z") : "ScreenCapture_" + timestamp + ".7z";
 
                 // 准备文件列表
                 List<string> filesToCompress = new List<string> { videoFilePath };
